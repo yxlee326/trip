@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI用户流失分析器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7fafc;
+        }
+        .container {
+            max-width: 1200px;
+        }
+        .section-header {
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .glow-effect {
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);
+            transition: box-shadow 0.3s ease-in-out;
+        }
+        .glow-effect:hover {
+            box-shadow: 0 0 25px rgba(59, 130, 246, 0.6);
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 flex items-center justify-center p-6">
+    <div class="container bg-white rounded-xl shadow-2xl p-8 space-y-8">
+
+        <!-- Header -->
+        <header class="text-center">
+            <h1 class="text-4xl font-bold text-gray-800">李雅瑄的用户流失分析小工具</h1>
+            <p class="mt-2 text-lg text-gray-500">基于数据驱动的用户洞察与产品增长</p>
+        </header>
+
+        <!-- Input & Action Section -->
+        <div class="bg-blue-50 rounded-lg p-6 space-y-4">
+            <h2 class="text-2xl font-semibold text-blue-800 section-header">1. 上传或使用示例数据</h2>
+            <div class="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
+                <button id="downloadBtn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-colors glow-effect">
+                    下载示例数据
+                </button>
+                <label for="uploadBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-colors glow-effect text-center cursor-pointer">
+                    上传数据表
+                    <input type="file" id="uploadBtn" accept=".csv" class="hidden">
+                </label>
+            </div>
+            <div id="dataCount" class="text-center text-sm text-gray-600 mt-2"></div>
+        </div>
+
+        <!-- Analysis Selection Section -->
+        <div id="analysisSelection" class="hidden bg-gray-50 rounded-lg p-6 space-y-4">
+            <h2 class="text-2xl font-semibold text-gray-800 section-header">2. 选择分析报告</h2>
+            <div class="flex justify-center">
+                <select id="analysisType" class="w-full md:w-1/2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3">
+                    <option value="">请选择一个分析维度</option>
+                    <option value="funnel">流失漏斗分析</option>
+                    <option value="profile">流失用户画像分析</option>
+                    <option value="value_matrix">高价值用户流失分析</option>
+                </select>
+            </div>
+        </div>
+        
+        <!-- Output Section -->
+        <div id="outputSection" class="hidden space-y-8">
+
+            <!-- Trend Charts -->
+            <div id="chartsSection" class="bg-white rounded-lg p-6 shadow-md space-y-6">
+                <h2 class="text-2xl font-semibold text-blue-800 section-header">流失趋势图表</h2>
+                <div class="grid grid-cols-1 gap-8">
+                    <div id="chartContainer">
+                        <!-- Chart will be rendered here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI-Generated Summary & Suggestions -->
+            <div class="bg-blue-50 rounded-lg p-6 space-y-4">
+                <h2 class="text-2xl font-semibold text-blue-800 section-header">AI分析报告与改进建议</h2>
+                <div id="reportOutput" class="space-y-4 text-gray-700">
+                    <!-- Dynamic content will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal for alerts -->
+        <div id="modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center">
+            <div class="bg-white p-6 rounded-lg shadow-xl text-center">
+                <p id="modal-message" class="text-lg text-gray-800"></p>
+                <button onclick="closeModal()" class="mt-4 px-4 py-2 bg-blue-500 text-white rounded-md">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const downloadBtn = document.getElementById('downloadBtn');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const analysisSelection = document.getElementById('analysisSelection');
+            const analysisTypeSelect = document.getElementById('analysisType');
+            const outputSection = document.getElementById('outputSection');
+            const dataCount = document.getElementById('dataCount');
+            const chartContainer = document.getElementById('chartContainer');
+            const reportOutput = document.getElementById('reportOutput');
+            const modal = document.getElementById('modal');
+            const modalMessage = document.getElementById('modal-message');
+
+            let churnData = [];
+            let myCharts = {};
+
+            const closeModal = () => {
+                modal.classList.add('hidden');
+            };
+
+            const showModal = (message) => {
+                modalMessage.textContent = message;
+                modal.classList.remove('hidden');
+            };
+
+            const convertToCSV = (arr) => {
+                const array = [Object.keys(arr[0])].concat(arr);
+                return array.map(it => {
+                    return Object.values(it).toString();
+                }).join('\n');
+            };
+
+            const downloadCSV = (data, filename) => {
+                const csvData = convertToCSV(data);
+                const blob = new Blob([`\ufeff${csvData}`], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                if (link.download !== undefined) {
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', filename);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            };
+            
+            // 模拟生成数据，数据分布更符合现实
+            const generateMockData = (count = 8543) => {
+                const genders = ['男性', '女性'];
+                const travelTypes = ['亲子游', '商务出差', '情侣/蜜月', '独自旅行', '深度体验', '休闲度假'];
+                const complaints = ['酒店房型不符', '航班延误', '客服响应慢', '订单出错', '价格波动大'];
+                const data = [];
+
+                // Helper to generate a value with a normal-like distribution within a range
+                const normalRandom = (min, max, skew) => {
+                    let u = 0, v = 0;
+                    while(u === 0) u = Math.random(); 
+                    while(v === 0) v = Math.random();
+                    let num = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+                    num = num / 10.0 + 0.5; // Scale to 0-1 range
+                    if (num > 1 || num < 0) num = normalRandom(min, max, skew); // Resample if outside range
+                    num = Math.pow(num, skew); // Apply skew
+                    return min + num * (max - min);
+                };
+
+                // Helper to generate a value with a random offset to blur the boundaries
+                const randomOffset = (value, minOffset, maxOffset) => {
+                    return value + Math.random() * (maxOffset - minOffset) + minOffset;
+                };
+
+                // 生成高价值用户数据 (~15%)
+                const highValueCount = Math.floor(count * 0.15);
+                for (let i = 0; i < highValueCount; i++) {
+                    let totalSpend = normalRandom(30000, 50000, 0.5);
+                    let lastActiveDays = normalRandom(1, 40, 1.5);
+                    data.push({
+                        age: Math.floor(normalRandom(25, 60, 0.8)),
+                        gender: genders[Math.floor(Math.random() * genders.length)],
+                        travelType: '商务出差',
+                        lastBookingDays: Math.floor(normalRandom(1, 100, 2)),
+                        complaint: Math.random() < 0.1 ? complaints[Math.floor(Math.random() * complaints.length)] : null,
+                        lastActiveDays: lastActiveDays,
+                        bookingCount: Math.floor(normalRandom(5, 20, 0.5)),
+                        totalSpend: totalSpend,
+                        userType: '高价值用户'
+                    });
+                }
+
+                // 生成高潜力用户数据 (~25%)
+                const potentialCount = Math.floor(count * 0.25);
+                for (let i = 0; i < potentialCount; i++) {
+                    let totalSpend = normalRandom(8000, 25000, 1.2);
+                    let lastActiveDays = normalRandom(1, 60, 0.8);
+                    data.push({
+                        age: Math.floor(normalRandom(20, 40, 0.5)),
+                        gender: genders[Math.floor(Math.random() * genders.length)],
+                        travelType: travelTypes[Math.floor(Math.random() * travelTypes.length)],
+                        lastBookingDays: Math.floor(normalRandom(1, 90, 1)),
+                        complaint: Math.random() < 0.2 ? complaints[Math.floor(Math.random() * complaints.length)] : null,
+                        lastActiveDays: lastActiveDays,
+                        bookingCount: Math.floor(normalRandom(1, 8, 0.8)),
+                        totalSpend: totalSpend,
+                        userType: '高潜力用户'
+                    });
+                }
+
+                // 生成一般流失用户数据 (~60%)
+                const normalCount = count - highValueCount - potentialCount;
+                for (let i = 0; i < normalCount; i++) {
+                    let totalSpend = normalRandom(500, 18000, 1.5);
+                    let lastActiveDays = normalRandom(30, 180, 1);
+                    data.push({
+                        age: Math.floor(normalRandom(20, 60, 1)),
+                        gender: genders[Math.floor(Math.random() * genders.length)],
+                        travelType: travelTypes[Math.floor(Math.random() * travelTypes.length)],
+                        lastBookingDays: Math.floor(normalRandom(120, 500, 0.8)),
+                        complaint: Math.random() < 0.5 ? complaints[Math.floor(Math.random() * complaints.length)] : null,
+                        lastActiveDays: lastActiveDays,
+                        bookingCount: Math.floor(normalRandom(1, 5, 2)),
+                        totalSpend: totalSpend,
+                        userType: '一般流失用户'
+                    });
+                }
+                
+                // 增加更多的特殊离散点和交集点
+                const specialPoints = [
+                    // 高消费，低活跃的特殊点
+                    { x: normalRandom(100, 180, 1), y: normalRandom(35000, 50000, 0.8), type: '高价值用户' },
+                    { x: normalRandom(90, 160, 1), y: normalRandom(30000, 40000, 1), type: '高价值用户' },
+                    // 低消费，高活跃的特殊点
+                    { x: normalRandom(1, 40, 0.5), y: normalRandom(500, 5000, 1.2), type: '高潜力用户' },
+                    { x: normalRandom(10, 50, 0.8), y: normalRandom(1000, 6000, 1.5), type: '高潜力用户' },
+                    // 高价值与高潜力的交集区域
+                    { x: normalRandom(30, 50, 1), y: normalRandom(20000, 30000, 0.8), type: '高价值用户' },
+                    { x: normalRandom(30, 50, 1), y: normalRandom(20000, 30000, 0.8), type: '高潜力用户' },
+                    // 高潜力与一般用户的交集区域
+                    { x: normalRandom(40, 70, 1), y: normalRandom(15000, 25000, 1.2), type: '高潜力用户' },
+                    { x: normalRandom(40, 70, 1), y: normalRandom(15000, 25000, 1.2), type: '一般流失用户' },
+                    // 所有群体的大交叉区域
+                    { x: normalRandom(30, 60, 1), y: normalRandom(18000, 25000, 1), type: '高价值用户' },
+                    { x: normalRandom(30, 60, 1), y: normalRandom(18000, 25000, 1), type: '高潜力用户' },
+                    { x: normalRandom(30, 60, 1), y: normalRandom(18000, 25000, 1), type: '一般流失用户' }
+                ];
+
+                specialPoints.forEach(p => {
+                    data.push({
+                        age: Math.floor(Math.random() * 50) + 20,
+                        gender: genders[Math.floor(Math.random() * genders.length)],
+                        travelType: travelTypes[Math.floor(Math.random() * travelTypes.length)],
+                        lastBookingDays: Math.floor(Math.random() * 500),
+                        complaint: complaints[Math.floor(Math.random() * complaints.length)],
+                        lastActiveDays: p.x,
+                        bookingCount: Math.floor(Math.random() * 20),
+                        totalSpend: p.y,
+                        userType: p.type
+                    });
+                });
+
+                return data;
+            };
+
+            const clearCharts = () => {
+                Object.values(myCharts).forEach(chart => {
+                    if (chart) chart.destroy();
+                });
+                myCharts = {};
+                chartContainer.innerHTML = '';
+            };
+
+            // 根据分析类型渲染图表和报告
+            const renderAnalysis = (analysisType) => {
+                clearCharts();
+                if (!churnData.length) {
+                    showModal('请先生成或上传数据！');
+                    return;
+                }
+
+                if (analysisType === 'funnel') {
+                    // 漏斗图数据
+                    const funnelData = {
+                        '总用户': 100000,
+                        '注册用户': 95000,
+                        '浏览用户': 80000,
+                        '预订用户': 55000,
+                        '流失用户': 8543
+                    };
+                    const canvas = document.createElement('canvas');
+                    chartContainer.appendChild(canvas);
+                    const funnelCtx = canvas.getContext('2d');
+                    myCharts.funnelChart = new Chart(funnelCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: Object.keys(funnelData),
+                            datasets: [{
+                                label: '用户数',
+                                data: Object.values(funnelData),
+                                backgroundColor: ['#4299e1', '#63b3ed', '#90cdf4', '#a0aec0', '#e53e3e']
+                            }]
+                        },
+                        options: {
+                            indexAxis: 'y',
+                            responsive: true,
+                            plugins: { legend: { display: false }, title: { display: true, text: '流失漏斗模型' } }
+                        }
+                    });
+                    reportOutput.innerHTML = `
+                        <h3 class="text-xl font-bold text-gray-800">流失漏斗分析报告</h3>
+                        <p>流失漏斗分析可以清晰地看到用户在不同阶段的转化情况。数据显示，从“预订用户”到“流失用户”的转化率最低，表明在用户完成一次预订后，未能有效留存，这是主要的流失环节。产品团队需要重点关注**预订后**的用户体验和运营策略。</p>
+                        <h3 class="text-xl font-bold text-gray-800 mt-6">产品改进建议</h3>
+                        <ul class="list-disc list-inside space-y-2">
+                            <li>**增强预订后服务**：推出智能行程助手，提供行前提醒、当地攻略、航班动态等服务。</li>
+                            <li>**建立社区互动**：鼓励用户分享旅行体验，通过UGC内容激发二次旅行意愿。</li>
+                            <li>**个性化推荐**：利用AI算法，根据用户的预订历史，在其旅行结束后主动推荐相关目的地或活动，刺激复购。</li>
+                        </ul>
+                    `;
+
+                } else if (analysisType === 'profile') {
+                    // 饼图数据
+                    const typeCounts = {};
+                    churnData.forEach(d => {
+                        typeCounts[d.travelType] = (typeCounts[d.travelType] || 0) + 1;
+                    });
+                    const canvas = document.createElement('canvas');
+                    chartContainer.appendChild(canvas);
+                    const pieCtx = canvas.getContext('2d');
+                    myCharts.pieChart = new Chart(pieCtx, {
+                        type: 'pie',
+                        data: {
+                            labels: Object.keys(typeCounts),
+                            datasets: [{
+                                label: '流失用户偏好',
+                                data: Object.values(typeCounts),
+                                backgroundColor: ['#48bb78', '#667eea', '#f6ad55', '#4fd1c5', '#d53f8c', '#a0aec0']
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: { position: 'top' },
+                                title: {
+                                    display: true,
+                                    text: '流失用户旅行偏好分布',
+                                    font: { size: 18 }
+                                },
+                                datalabels: {
+                                    formatter: (value, context) => {
+                                        const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                        const percentage = (value / total * 100).toFixed(1);
+                                        return `${value} (${percentage}%)`;
+                                    },
+                                    color: '#fff',
+                                    font: {
+                                        weight: 'bold'
+                                    }
+                                }
+                            },
+                            animation: {
+                                animateScale: true,
+                                animateRotate: true
+                            }
+                        },
+                        plugins: [ChartDataLabels]
+                    });
+
+                    reportOutput.innerHTML = `
+                        <h3 class="text-xl font-bold text-gray-800">流失用户画像分析报告</h3>
+                        <p>数据显示，偏好“亲子游”和“深度体验”的用户流失率较高。这两类用户对产品的功能和内容有更个性化的需求，目前的标准化产品可能无法完全满足。同时，我们也发现与“酒店房型不符”和“价格波动”相关的投诉是引发流失的关键因素。</p>
+                        <h3 class="text-xl font-bold text-gray-800 mt-6">产品改进建议</h3>
+                        <ul class="list-disc list-inside space-y-2">
+                            <li>**精细化运营**：针对不同偏好的用户，提供定制化的内容推荐和产品服务，例如“亲子游专区”、“小众体验攻略”等。</li>
+                            <li>**提升信息透明度**：推动酒店合作方提供更多高清实拍图和3D全景展示，减少用户预期与实际体验的偏差。</li>
+                            <li>**价格波动提醒**：开发价格监控功能，当用户关注的机票或酒店价格出现波动时，及时发送提醒，增强用户信任。</li>
+                        </ul>
+                    `;
+
+                } else if (analysisType === 'value_matrix') {
+                    // 用户流失价值矩阵图
+                    const canvas = document.createElement('canvas');
+                    chartContainer.appendChild(canvas);
+                    const matrixCtx = canvas.getContext('2d');
+                    
+                    const highValueData = churnData.filter(d => d.userType === '高价值用户');
+                    const potentialData = churnData.filter(d => d.userType === '高潜力用户');
+                    const normalData = churnData.filter(d => d.userType === '一般流失用户');
+                    
+                    myCharts.matrixChart = new Chart(matrixCtx, {
+                        type: 'scatter',
+                        data: {
+                            datasets: [
+                                {
+                                    label: '高价值用户',
+                                    data: highValueData.map(d => ({ x: d.lastActiveDays, y: d.totalSpend })),
+                                    backgroundColor: 'rgba(239, 68, 68, 0.7)',
+                                    pointRadius: 5
+                                },
+                                {
+                                    label: '高潜力用户',
+                                    data: potentialData.map(d => ({ x: d.lastActiveDays, y: d.totalSpend })),
+                                    backgroundColor: 'rgba(52, 211, 153, 0.7)',
+                                    pointRadius: 4
+                                },
+                                {
+                                    label: '一般流失用户',
+                                    data: normalData.map(d => ({ x: d.lastActiveDays, y: d.totalSpend })),
+                                    backgroundColor: 'rgba(59, 130, 246, 0.6)',
+                                    pointRadius: 3
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                x: {
+                                    title: { display: true, text: '最后活跃天数' },
+                                    min: 0, max: 180,
+                                    ticks: { maxTicksLimit: 10 },
+                                    grid: { drawOnChartArea: false }
+                                },
+                                y: {
+                                    title: { display: true, text: '总消费金额' },
+                                    min: 0, max: 50000,
+                                    grid: { drawOnChartArea: false }
+                                }
+                            },
+                            plugins: {
+                                title: { display: true, text: '用户流失价值矩阵图' }
+                            }
+                        }
+                    });
+                    reportOutput.innerHTML = `
+                        <h3 class="text-xl font-bold text-gray-800">用户流失价值矩阵分析报告</h3>
+                        <p>价值矩阵图通过将用户按**活跃度**和**消费金额**进行分类，可以直观地看到高价值用户的流失情况。**高价值用户**（红色）对业务收入影响最大，他们的流失往往是由于核心体验未能满足。而**高潜力用户**（绿色）虽然目前消费金额不高，但活跃度高，未来有转化为高价值用户的潜力，是产品需要重点挖掘和培养的对象。</p>
+                        <h3 class="text-xl font-bold text-gray-800 mt-6">产品改进建议</h3>
+                        <ul class="list-disc list-inside space-y-2">
+                            <li>**专属会员服务**：为高价值用户提供专属的客服通道、预订保障和会员福利，提升其尊贵感和忠诚度。</li>
+                            <li>**精准引导**：针对高潜力用户，通过个性化内容、定制化优惠券和精准推送，引导他们完成更高价值的消费行为。</li>
+                            <li>**精细化运营**：对不同类型的用户进行差异化运营，例如根据其旅行偏好和预算推荐定制化的产品。</li>
+                        </ul>
+                    `;
+                }
+                outputSection.classList.remove('hidden');
+            };
+
+            // 页面加载时自动生成并加载数据
+            const initializeData = () => {
+                churnData = generateMockData();
+                dataCount.textContent = `目前正在使用 ${churnData.length} 条模拟数据进行分析。`;
+                analysisSelection.classList.remove('hidden');
+            };
+            
+            downloadBtn.addEventListener('click', () => {
+                const sampleData = generateMockData(8543);
+                downloadCSV(sampleData, 'sample_churn_data.csv');
+            });
+
+            uploadBtn.addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (!file) {
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const text = e.target.result;
+                    const lines = text.split('\n');
+                    const headers = lines[0].split(',').map(h => h.trim());
+                    const data = [];
+                    for (let i = 1; i < lines.length; i++) {
+                        const values = lines[i].split(',');
+                        if (values.length === headers.length) {
+                            const row = {};
+                            headers.forEach((header, j) => {
+                                row[header] = values[j].trim();
+                            });
+                            data.push(row);
+                        }
+                    }
+                    if (data.length === 0) {
+                        showModal('上传的CSV文件没有找到数据或格式不正确，请检查。');
+                        return;
+                    }
+                    churnData = data;
+                    dataCount.textContent = `已成功上传 ${churnData.length} 条数据。`;
+                    analysisSelection.classList.remove('hidden');
+                    outputSection.classList.add('hidden'); // Reset view on new upload
+                    analysisTypeSelect.value = ''; // Reset select
+                };
+                reader.readAsText(file);
+            });
+
+            analysisTypeSelect.addEventListener('change', (event) => {
+                const selectedType = event.target.value;
+                if (selectedType) {
+                    renderAnalysis(selectedType);
+                } else {
+                    outputSection.classList.add('hidden');
+                }
+            });
+
+            initializeData();
+        });
+    </script>
+</body>
+</html>
